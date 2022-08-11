@@ -4,7 +4,86 @@ import { mount } from '../../src'
 
 vi.mock('vue', () => mockVue)
 
-const { configureCompat, extend, defineComponent, h } = mockVue
+const { configureCompat, extend, defineComponent, h, ref, onMounted } = mockVue
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+const TestAsync = defineComponent({
+  template: '<div><div>{{ mountText }}</div><div>{{ asyncText }}</div></div>',
+
+  props: ['done'],
+
+  setup({ done }) {
+    const mountText = ref()
+    const asyncText = ref()
+
+    onMounted(() => {
+      mountText.value = 'mounted'
+    })
+
+    sleep(0).then(() => {
+      asyncText.value = 'async'
+      done?.()
+    })
+
+    return {
+      mountText,
+      asyncText
+    }
+  }
+})
+
+describe('bug repro', () => {
+  beforeEach(() => {
+    configureCompat({ MODE: 2 })
+  })
+
+  it('should show onMount text', () => {
+    return new Promise<void>((done) => {
+      const wrapper = mount(TestAsync)
+      wrapper.vm.$nextTick(() => {
+        expect(wrapper.html()).toMatch('mounted')
+        done()
+      })
+    })
+  })
+
+  it('should show async text', async () => {
+    let renderedAsyncResolve
+    const renderedAsync = new Promise(
+      (resolve) => (renderedAsyncResolve = resolve)
+    )
+
+    const wrapper = mount(TestAsync, {
+      propsData: { done: renderedAsyncResolve }
+    })
+
+    await renderedAsync
+    expect(wrapper.html()).toMatch('async')
+  })
+
+  it('should show async text with nextTick', () => {
+    /* eslint-disable no-async-promise-executor */
+    return new Promise<void>(async (done) => {
+      let renderedAsyncResolve
+      const renderedAsync = new Promise(
+        (resolve) => (renderedAsyncResolve = resolve)
+      )
+
+      const wrapper = mount(TestAsync, {
+        props: { done: renderedAsyncResolve }
+      })
+
+      await renderedAsync
+      wrapper.vm.$nextTick(() => {
+        expect(wrapper.html()).toMatch('async')
+        done()
+      })
+    })
+  })
+})
 
 describe('@vue/compat build', () => {
   describe.each(['suppress-warning', false])(
